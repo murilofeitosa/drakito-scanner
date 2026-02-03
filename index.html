@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Drakito Scanner v1.0 | Murilo Feitosa</title>
+    <title>Drakito Scanner | Murilo Feitosa</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
@@ -133,7 +133,6 @@
             margin-top: 20px;
         }
 
-        /* Footer */
         .footer {
             margin-top: 40px;
             text-align: center;
@@ -150,14 +149,15 @@
             <span>Ferramenta de Apoio à Decisão</span>
         </div>
         <div>
-            <button onclick="simularJogos()" style="padding: 8px 15px; background: var(--accent-green); border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+            <button id="btn-update" onclick="buscarJogosAoVivo()" style="padding: 8px 15px; background: var(--accent-green); border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
                 <i class="fas fa-sync"></i> Atualizar Scanner
             </button>
         </div>
     </div>
 
     <div id="games-container" class="live-grid">
-        </div>
+        <p style="text-align: center; color: #666; width: 100%;">Clique em "Atualizar Scanner" para buscar jogos reais.</p>
+    </div>
 
     <div style="margin-top: 40px; padding: 20px; background: var(--card-bg); border-radius: 8px;">
         <h3><i class="fas fa-calculator"></i> Calculadora de Risco (Stop Loss)</h3>
@@ -200,58 +200,102 @@
     </div>
 
     <script>
-        // Dados Simulados (Mock) para demonstração
-        // Em um app real, isso viria de uma API como API-Football
-        const times = [
-            { home: "Man. City", away: "Luton Town", scoreH: 1, scoreA: 0, time: "35'", league: "Premier League" },
-            { home: "Ceará", away: "Sport", scoreH: 2, scoreA: 1, time: "55'", league: "Série B" }, // Exemplo personalizado
-            { home: "Real Madrid", away: "Getafe", scoreH: 0, scoreA: 0, time: "20'", league: "La Liga" }, // Não deve aparecer (Empate)
-            { home: "Bayern", away: "Mainz", scoreH: 3, scoreA: 0, time: "80'", league: "Bundesliga" }, // Não deve aparecer (>1 gol)
-            { home: "Flamengo", away: "Palmeiras", scoreH: 0, scoreA: 1, time: "48'", league: "Brasileirão" }
-        ];
+        // CONFIGURAÇÃO DA API
+        const API_KEY = 'e8bd20dfd3749763cb63a31740b735d2'; // Sua chave inserida aqui
+        const API_HOST = 'v3.football.api-sports.io';
 
-        function simularJogos() {
+        async function buscarJogosAoVivo() {
             const container = document.getElementById('games-container');
-            container.innerHTML = ''; // Limpa grid
+            const btnUpdate = document.getElementById('btn-update');
+            
+            // Feedback visual
+            btnUpdate.innerText = 'Buscando...';
+            btnUpdate.disabled = true;
+            container.innerHTML = '<p style="text-align:center; color: #888;">Conectando à API...</p>';
 
-            // Lógica do Drakito: Filtra apenas jogos com diferença de 1 gol
-            const jogosFiltrados = times.filter(jogo => {
-                return Math.abs(jogo.scoreH - jogo.scoreA) === 1;
-            });
+            try {
+                // Requisição real para a API
+                const response = await fetch(`https://${API_HOST}/fixtures?live=all`, {
+                    "method": "GET",
+                    "headers": {
+                        "x-rapidapi-host": API_HOST,
+                        "x-rapidapi-key": API_KEY
+                    }
+                });
 
-            if (jogosFiltrados.length === 0) {
-                container.innerHTML = '<p>Nenhum jogo no padrão encontrado no momento.</p>';
-                return;
+                if (!response.ok) {
+                    throw new Error(`Erro API: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // Limpa container
+                container.innerHTML = '';
+
+                // Verifica erros de cota
+                if (data.errors && Object.keys(data.errors).length > 0) {
+                    console.error("Erro API:", data.errors);
+                    container.innerHTML = `<p style="color: #ff4081; text-align: center;">Erro: ${JSON.stringify(data.errors)}</p>`;
+                    return;
+                }
+
+                const jogos = data.response;
+
+                // ----------------------------------------------------
+                // FILTRO DRAKITO: Apenas jogos com diferença de 1 gol
+                // ----------------------------------------------------
+                const jogosFiltrados = jogos.filter(item => {
+                    const golHome = item.goals.home;
+                    const golAway = item.goals.away;
+                    return Math.abs(golHome - golAway) === 1;
+                });
+
+                if (jogosFiltrados.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: #888;">Nenhum jogo ao vivo com diferença exata de 1 gol no momento.</p>';
+                } else {
+                    jogosFiltrados.forEach(item => {
+                        const homeName = item.teams.home.name;
+                        const awayName = item.teams.away.name;
+                        const scoreH = item.goals.home;
+                        const scoreA = item.goals.away;
+                        const tempo = item.fixture.status.elapsed + "'";
+                        const liga = item.league.name;
+
+                        // Lógica: Em quem dar LAY (quem está perdendo)
+                        let losingTeam = scoreH < scoreA ? homeName : awayName;
+
+                        const card = document.createElement('div');
+                        card.className = 'match-card';
+                        card.innerHTML = `
+                            <div class="league-name">${liga} • ${tempo}</div>
+                            <div class="scoreboard">
+                                <div class="team"><span>${homeName}</span></div>
+                                <div class="score">${scoreH} - ${scoreA}</div>
+                                <div class="team"><span>${awayName}</span></div>
+                            </div>
+                            <div class="action-area" onclick="abrirChecklist('${homeName} vs ${awayName}')">
+                                <div class="action-label">Oportunidade Encontrada</div>
+                                <div class="action-target">LAY ${losingTeam.toUpperCase()}</div>
+                                <div style="font-size: 0.7rem; margin-top: 5px; color: #ccc">(Clique para Checklist)</div>
+                            </div>
+                        `;
+                        container.appendChild(card);
+                    });
+                }
+
+            } catch (error) {
+                console.error(error);
+                container.innerHTML = `<p style="color: #ff4081; text-align: center;">Falha ao buscar dados. Verifique sua conexão.</p>`;
+            } finally {
+                btnUpdate.innerHTML = '<i class="fas fa-sync"></i> Atualizar Scanner';
+                btnUpdate.disabled = false;
             }
-
-            jogosFiltrados.forEach(jogo => {
-                // Determinar quem está perdendo (Target do Lay)
-                let losingTeam = jogo.scoreH < jogo.scoreA ? jogo.home : jogo.away;
-                
-                const card = document.createElement('div');
-                card.className = 'match-card';
-                card.innerHTML = `
-                    <div class="league-name">${jogo.league} • ${jogo.time}</div>
-                    <div class="scoreboard">
-                        <div class="team"><span>${jogo.home}</span></div>
-                        <div class="score">${jogo.scoreH} - ${jogo.scoreA}</div>
-                        <div class="team"><span>${jogo.away}</span></div>
-                    </div>
-                    <div class="action-area" onclick="abrirChecklist('${jogo.home} vs ${jogo.away}')">
-                        <div class="action-label">Oportunidade Encontrada</div>
-                        <div class="action-target">LAY ${losingTeam.toUpperCase()}</div>
-                        <div style="font-size: 0.7rem; margin-top: 5px; color: #ccc">(Clique para Checklist)</div>
-                    </div>
-                `;
-                container.appendChild(card);
-            });
         }
 
-        // Funções do Modal
+        // Funções Auxiliares (Modal e Calculadora)
         function abrirChecklist(matchTitle) {
             document.getElementById('modal-match-title').innerText = matchTitle;
             document.getElementById('checklistModal').style.display = 'flex';
-            // Reset checkboxes
             document.querySelectorAll('input[type="checkbox"]').forEach(c => c.checked = false);
         }
 
@@ -259,7 +303,6 @@
             document.getElementById('checklistModal').style.display = 'none';
         }
 
-        // Calculadora de Risco
         function calcularRisco() {
             const stake = parseFloat(document.getElementById('stake').value);
             const odd = parseFloat(document.getElementById('odd-back').value);
@@ -268,17 +311,11 @@
                 document.getElementById('result-calc').innerText = "Preencha os valores.";
                 return;
             }
-
-            // Cálculo aproximado de responsabilidade no Lay
-            // Responsabilidade = Stake * (Odd - 1)
+            // Cálculo de responsabilidade no Lay
             const responsabilidade = stake * (odd - 1);
-            
             document.getElementById('result-calc').innerHTML = 
-                `Se tomar o gol, você perde aprox: <strong style="color: #ff4081">R$ ${responsabilidade.toFixed(2)}</strong> (Responsabilidade)`;
+                `Se tomar o gol, a responsabilidade é: <strong style="color: #ff4081">R$ ${responsabilidade.toFixed(2)}</strong>`;
         }
-
-        // Iniciar com dados simulados
-        window.onload = simularJogos;
     </script>
 </body>
 </html>
